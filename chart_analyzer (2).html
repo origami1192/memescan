@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chart Analyzer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; min-height: 100vh; padding: 16px; }
+
+.header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.header h1 { font-size: 14px; font-weight: 600; color: #888; letter-spacing: 0.1em; text-transform: uppercase; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+.dot.live { background: #22c55e; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.input-row { display: flex; gap: 8px; margin-bottom: 20px; }
+input { flex: 1; background: #13131a; border: 1px solid #222; border-radius: 6px; padding: 10px 14px; color: #e0e0e0; font-family: 'SF Mono', monospace; font-size: 13px; outline: none; }
+input:focus { border-color: #444; }
+input::placeholder { color: #444; }
+button { background: #1a1a2e; border: 1px solid #333; border-radius: 6px; padding: 10px 18px; color: #e0e0e0; font-family: 'SF Mono', monospace; font-size: 12px; cursor: pointer; white-space: nowrap; }
+button:hover { background: #222236; border-color: #555; }
+button.on { background: #22c55e20; border-color: #22c55e; color: #22c55e; }
+
+.grid4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 12px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.card { background: #13131a; border: 1px solid #1e1e2e; border-radius: 8px; padding: 12px; }
+.card-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+.card-value { font-size: 16px; font-weight: 600; }
+.up { color: #22c55e; } .down { color: #ef4444; } .warn { color: #f59e0b; }
+
+.chart-wrap { background: #13131a; border: 1px solid #1e1e2e; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.tf-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.tf { padding: 3px 10px; font-size: 11px; background: #0a0a0f; border: 1px solid #222; border-radius: 4px; color: #555; cursor: pointer; }
+.tf.active { background: #1a1a2e; border-color: #444; color: #e0e0e0; }
+canvas { width: 100%; display: block; }
+.chart-info { font-size: 10px; color: #444; margin-top: 6px; text-align: right; }
+
+/* 過熱ゲージ */
+.heat-wrap { background: #13131a; border: 1px solid #1e1e2e; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.heat-top { display: flex; align-items: center; gap: 20px; margin-bottom: 12px; }
+.heat-num { font-size: 52px; font-weight: 700; line-height: 1; }
+.heat-right .heat-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.heat-right .heat-desc { font-size: 12px; color: #666; }
+.gauge-track { height: 10px; background: #1e1e2e; border-radius: 5px; overflow: hidden; margin-bottom: 12px; }
+.gauge-fill { height: 100%; border-radius: 5px; transition: width .5s, background .5s; }
+.factors { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+.factor { background: #0a0a0f; border-radius: 6px; padding: 10px; }
+.factor-lbl { font-size: 10px; color: #555; margin-bottom: 5px; }
+.factor-bar { height: 3px; background: #1e1e2e; border-radius: 2px; margin-bottom: 4px; overflow: hidden; }
+.factor-fill { height: 100%; border-radius: 2px; transition: width .4s; }
+.factor-val { font-size: 12px; font-weight: 600; }
+
+/* エントリー */
+.entry-wrap { background: #13131a; border: 1px solid #1e1e2e; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.entry-title { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+.entry-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #1e1e2e; font-size: 12px; }
+.entry-row:last-child { border-bottom: none; }
+.entry-lbl { color: #666; }
+.entry-val { font-weight: 700; }
+.entry-sub { font-size: 10px; color: #555; margin-top: 1px; text-align: right; }
+
+.msg { font-size: 13px; color: #555; padding: 8px 0; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="dot" id="dot"></div>
+  <h1>Chart Analyzer</h1>
+  <span style="color:#444;font-size:11px;margin-left:auto" id="updLabel"></span>
+</div>
+
+<div class="input-row">
+  <input id="ca" type="text" placeholder="CAを入力してEnter（xxxpump）" />
+  <button onclick="load()">分析</button>
+  <button id="autoBtn" onclick="toggleAuto()">自動更新</button>
+</div>
+
+<div id="msg" class="msg"></div>
+
+<div id="main" class="hidden">
+  <!-- 統計 -->
+  <div class="grid4" id="statsGrid">
+    <div class="card"><div class="card-label">現在価格</div><div class="card-value" id="sPrice">—</div></div>
+    <div class="card"><div class="card-label">5m変動</div><div class="card-value" id="sChg5">—</div></div>
+    <div class="card"><div class="card-label">流動性</div><div class="card-value" id="sLiq">—</div></div>
+    <div class="card"><div class="card-label">買い比率(5m)</div><div class="card-value" id="sBuy">—</div></div>
+  </div>
+
+  <!-- チャート -->
+  <div class="chart-wrap">
+    <div class="tf-row">
+      <button class="tf active" onclick="setTf('minute',1,this)">1m</button>
+      <button class="tf" onclick="setTf('minute',5,this)">5m</button>
+      <button class="tf" onclick="setTf('minute',15,this)">15m</button>
+      <button class="tf" onclick="setTf('hour',1,this)">1h</button>
+    </div>
+    <canvas id="chart" height="200"></canvas>
+    <div class="chart-info" id="chartInfo">—</div>
+  </div>
+
+  <!-- 過熱スコア -->
+  <div class="heat-wrap">
+    <div class="heat-top">
+      <div class="heat-num" id="hScore">—</div>
+      <div class="heat-right">
+        <div class="heat-name" id="hName">—</div>
+        <div class="heat-desc" id="hDesc">—</div>
+      </div>
+    </div>
+    <div class="gauge-track"><div class="gauge-fill" id="gFill" style="width:0%"></div></div>
+    <div class="factors">
+      <div class="factor">
+        <div class="factor-lbl">5m変動</div>
+        <div class="factor-bar"><div class="factor-fill" id="ff1" style="width:0%"></div></div>
+        <div class="factor-val" id="fv1">—</div>
+      </div>
+      <div class="factor">
+        <div class="factor-lbl">買い比率</div>
+        <div class="factor-bar"><div class="factor-fill" id="ff2" style="width:0%"></div></div>
+        <div class="factor-val" id="fv2">—</div>
+      </div>
+      <div class="factor">
+        <div class="factor-lbl">1h変動</div>
+        <div class="factor-bar"><div class="factor-fill" id="ff3" style="width:0%"></div></div>
+        <div class="factor-val" id="fv3">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- エントリー目安 -->
+  <div class="entry-wrap">
+    <div class="entry-title">エントリー目安（OHLCVから算出）</div>
+    <div id="entryContent">—</div>
+  </div>
+</div>
+
+<script>
+let mint = '', poolAddr = '', autoTimer = null, isAuto = false;
+let currentTf = 'minute', currentAgg = 1;
+let ohlcv = [];
+
+document.getElementById('ca').addEventListener('keydown', e => { if(e.key==='Enter') load(); });
+
+function toggleAuto() {
+  isAuto = !isAuto;
+  const btn = document.getElementById('autoBtn');
+  if(isAuto) {
+    btn.textContent = '自動更新 ON'; btn.classList.add('on');
+    autoTimer = setInterval(() => { if(mint) fetchAll(); }, 8000);
+  } else {
+    btn.textContent = '自動更新'; btn.classList.remove('on');
+    clearInterval(autoTimer);
+  }
+}
+
+function setTf(tf, agg, el) {
+  currentTf = tf; currentAgg = agg;
+  document.querySelectorAll('.tf').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  if(poolAddr) fetchOHLCV();
+}
+
+async function load() {
+  mint = document.getElementById('ca').value.trim();
+  if(!mint) return;
+  poolAddr = '';
+  ohlcv = [];
+  document.getElementById('msg').textContent = '取得中...';
+  document.getElementById('main').classList.add('hidden');
+  await fetchAll();
+}
+
+async function fetchAll() {
+  try {
+    await fetchDex();
+    if(poolAddr) await fetchOHLCV();
+    document.getElementById('main').classList.remove('hidden');
+    document.getElementById('msg').textContent = '';
+    document.getElementById('dot').classList.add('live');
+    document.getElementById('updLabel').textContent = '更新: ' + new Date().toLocaleTimeString('ja-JP');
+  } catch(e) {
+    document.getElementById('msg').textContent = 'エラー: ' + e.message;
+  }
+}
+
+async function fetchDex() {
+  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mint}`);
+  const data = await res.json();
+  const pairs = (data.pairs||[]).filter(p=>p.chainId==='solana');
+  if(!pairs.length) throw new Error('ペアが見つかりません');
+
+  const pair = pairs.sort((a,b)=>parseFloat(b.liquidity?.usd||0)-parseFloat(a.liquidity?.usd||0))[0];
+  poolAddr = pair.pairAddress;
+
+  const price = parseFloat(pair.priceUsd||0);
+  const chg5 = parseFloat(pair.priceChange?.m5||0);
+  const chg1h = parseFloat(pair.priceChange?.h1||0);
+  const liq = parseFloat(pair.liquidity?.usd||0);
+  const buys = pair.txns?.m5?.buys||0;
+  const sells = pair.txns?.m5?.sells||0;
+  const br = (buys+sells)>0 ? buys/(buys+sells) : 0.5;
+
+  document.getElementById('sPrice').textContent = fmtPrice(price);
+  const c5el = document.getElementById('sChg5');
+  c5el.textContent = `${chg5>=0?'+':''}${chg5.toFixed(2)}%`;
+  c5el.className = `card-value ${chg5>=0?'up':'down'}`;
+  document.getElementById('sLiq').textContent = '$' + fmtNum(liq);
+  const brel = document.getElementById('sBuy');
+  brel.textContent = `${(br*100).toFixed(0)}%`;
+  brel.className = `card-value ${br>=0.55?'up':br>=0.45?'warn':'down'}`;
+
+  // 過熱スコア
+  const s1 = Math.min(100, Math.max(0, (chg5+10)/20*100));
+  const s2 = Math.min(100, br*100*1.4);
+  const s3 = Math.min(100, Math.max(0, (chg1h+20)/40*100));
+  const score = Math.round(s1*0.4 + s2*0.35 + s3*0.25);
+
+  let hName, hDesc, hColor;
+  if(score>=80){hName='🔥 過熱';hDesc='買われすぎ。押し目を待つのが有利。';hColor='#ef4444';}
+  else if(score>=60){hName='⚡ 加速中';hDesc='上昇モメンタムあり。エントリー検討可。';hColor='#f59e0b';}
+  else if(score>=40){hName='📈 上昇傾向';hDesc='緩やかな上昇。5m価格への指値が有効。';hColor='#22c55e';}
+  else{hName='😴 低調';hDesc='動きが鈍い。様子見推奨。';hColor='#666';}
+
+  document.getElementById('hScore').textContent = score;
+  document.getElementById('hScore').style.color = hColor;
+  document.getElementById('hName').textContent = hName;
+  document.getElementById('hName').style.color = hColor;
+  document.getElementById('hDesc').textContent = hDesc;
+  document.getElementById('gFill').style.width = score+'%';
+  document.getElementById('gFill').style.background = hColor;
+
+  const fc = v => v>=5?'#22c55e':v>=0?'#f59e0b':'#ef4444';
+  document.getElementById('ff1').style.cssText = `width:${s1}%;background:${fc(chg5)}`;
+  document.getElementById('fv1').textContent = `${chg5>=0?'+':''}${chg5.toFixed(1)}%`;
+  document.getElementById('fv1').style.color = fc(chg5);
+  document.getElementById('ff2').style.cssText = `width:${s2}%;background:${br>=0.55?'#22c55e':br>=0.45?'#f59e0b':'#ef4444'}`;
+  document.getElementById('fv2').textContent = `${(br*100).toFixed(0)}%`;
+  document.getElementById('fv2').style.color = br>=0.55?'#22c55e':br>=0.45?'#f59e0b':'#ef4444';
+  document.getElementById('ff3').style.cssText = `width:${s3}%;background:${fc(chg1h)}`;
+  document.getElementById('fv3').textContent = `${chg1h>=0?'+':''}${chg1h.toFixed(1)}%`;
+  document.getElementById('fv3').style.color = fc(chg1h);
+}
+
+async function fetchOHLCV() {
+  const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddr}/ohlcv/${currentTf}?aggregate=${currentAgg}&limit=60&currency=usd`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json;version=20230302' } });
+  const data = await res.json();
+  const candles = data?.data?.attributes?.ohlcv_list || [];
+  if(!candles.length) { document.getElementById('chartInfo').textContent = 'OHLCVデータなし'; return; }
+
+  // [timestamp, open, high, low, close, volume]
+  ohlcv = candles.reverse(); // 古い順に並べ直す
+  drawChart(ohlcv);
+  calcEntry(ohlcv);
+  document.getElementById('chartInfo').textContent = `${ohlcv.length}本 | 最終: ${new Date(ohlcv[ohlcv.length-1][0]*1000).toLocaleTimeString('ja-JP')}`;
+}
+
+function drawChart(candles) {
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 600;
+  canvas.width = W * (window.devicePixelRatio||1);
+  canvas.height = 200 * (window.devicePixelRatio||1);
+  ctx.scale(window.devicePixelRatio||1, window.devicePixelRatio||1);
+  const w = W, h = 200, pad = { t:10, b:20, l:60, r:10 };
+  const cw = w - pad.l - pad.r;
+  const ch = h - pad.t - pad.b;
+
+  const highs = candles.map(c=>c[2]);
+  const lows = candles.map(c=>c[3]);
+  const maxP = Math.max(...highs)*1.001;
+  const minP = Math.min(...lows)*0.999;
+  const range = maxP - minP;
+
+  const toY = p => pad.t + ch - (p-minP)/range*ch;
+  const toX = i => pad.l + i/(candles.length-1)*cw;
+
+  ctx.clearRect(0,0,w,h);
+
+  // グリッド
+  for(let i=0;i<=4;i++) {
+    const y = pad.t + ch*i/4;
+    ctx.strokeStyle='#1e1e2e'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke();
+    const val = maxP - range*i/4;
+    ctx.fillStyle='#444'; ctx.font=`10px SF Mono,monospace`;
+    ctx.textAlign='right'; ctx.fillText(fmtPrice(val), pad.l-4, y+3);
+  }
+
+  // ローソク足
+  const cw2 = cw / candles.length;
+  const bodyW = Math.max(1, cw2 * 0.6);
+  candles.forEach((c, i) => {
+    const [ts, open, high, low, close, vol] = c;
+    const x = pad.l + i*cw2 + cw2/2;
+    const isUp = close >= open;
+    const color = isUp ? '#22c55e' : '#ef4444';
+
+    // ヒゲ
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, toY(high));
+    ctx.lineTo(x, toY(low));
+    ctx.stroke();
+
+    // ボディ
+    const top = toY(Math.max(open, close));
+    const bot = toY(Math.min(open, close));
+    const bh = Math.max(1, bot - top);
+    ctx.fillStyle = color;
+    ctx.fillRect(x - bodyW/2, top, bodyW, bh);
+  });
+
+  // 現在価格ライン
+  const last = candles[candles.length-1][4];
+  const ly = toY(last);
+  ctx.setLineDash([4,4]);
+  ctx.strokeStyle = '#ffffff30'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.l,ly); ctx.lineTo(w-pad.r,ly); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#ffffff20'; ctx.textAlign='left'; ctx.font='10px SF Mono,monospace';
+  ctx.fillText(fmtPrice(last), w-pad.r+2, ly+3);
+}
+
+function calcEntry(candles) {
+  if(!candles.length) return;
+
+  const closes = candles.map(c=>c[4]);
+  const highs = candles.map(c=>c[2]);
+  const lows = candles.map(c=>c[3]);
+  const vols = candles.map(c=>c[5]);
+
+  const currentPrice = closes[closes.length-1];
+  const recentLow = Math.min(...lows.slice(-20));   // 直近20本の最安値
+  const recentHigh = Math.max(...highs.slice(-20));  // 直近20本の最高値
+  const avgVol = vols.reduce((a,b)=>a+b,0)/vols.length;
+  const lastVol = vols[vols.length-1];
+
+  // 直近の押し目幅を計算（高値から安値への下落率）
+  const pullbacks = [];
+  for(let i=1;i<candles.length;i++) {
+    const prev = candles[i-1][2]; // 前の高値
+    const curr = candles[i][3];   // 現在の安値
+    if(curr < prev) {
+      pullbacks.push((curr-prev)/prev*100);
+    }
+  }
+  const avgPullback = pullbacks.length ? pullbacks.reduce((a,b)=>a+b,0)/pullbacks.length : -3;
+  const medPullback = pullbacks.length ? pullbacks.sort((a,b)=>a-b)[Math.floor(pullbacks.length/2)] : -3;
+
+  // サポート・レジスタンス
+  const support = recentLow;
+  const resist = recentHigh;
+  const range = resist - support;
+
+  // エントリー目安（中央値の押し目）
+  const entryPct = medPullback; // 例: -4.2%
+  const entryPrice = currentPrice * (1 + entryPct/100);
+  const stopPrice = support * 0.98;
+  const targetPrice = currentPrice + range * 0.5;
+
+  // 距離
+  const distToEntry = ((entryPrice - currentPrice) / currentPrice * 100).toFixed(1);
+  const distToStop = ((stopPrice - currentPrice) / currentPrice * 100).toFixed(1);
+  const distToTarget = ((targetPrice - currentPrice) / currentPrice * 100).toFixed(1);
+  const rr = Math.abs(parseFloat(distToTarget) / parseFloat(distToStop));
+
+  const volSignal = lastVol > avgVol * 1.5 ? '📈 出来高急増' : lastVol < avgVol * 0.5 ? '📉 出来高低下' : '→ 出来高普通';
+
+  document.getElementById('entryContent').innerHTML = `
+    <div class="entry-row">
+      <span class="entry-lbl">指値目安</span>
+      <div>
+        <div class="entry-val up">${fmtPrice(entryPrice)}</div>
+        <div class="entry-sub">現在から ${distToEntry}% (平均押し目: ${medPullback.toFixed(1)}%)</div>
+      </div>
+    </div>
+    <div class="entry-row">
+      <span class="entry-lbl">サポート</span>
+      <div>
+        <div class="entry-val">${fmtPrice(support)}</div>
+        <div class="entry-sub">直近${Math.min(20,candles.length)}本の最安値</div>
+      </div>
+    </div>
+    <div class="entry-row">
+      <span class="entry-lbl">レジスタンス</span>
+      <div>
+        <div class="entry-val">${fmtPrice(resist)}</div>
+        <div class="entry-sub">直近${Math.min(20,candles.length)}本の最高値</div>
+      </div>
+    </div>
+    <div class="entry-row">
+      <span class="entry-lbl">ストップロス</span>
+      <div>
+        <div class="entry-val down">${fmtPrice(stopPrice)}</div>
+        <div class="entry-sub">サポート -2% (${distToStop}%)</div>
+      </div>
+    </div>
+    <div class="entry-row">
+      <span class="entry-lbl">利確目安</span>
+      <div>
+        <div class="entry-val up">${fmtPrice(targetPrice)}</div>
+        <div class="entry-sub">レンジ幅の50% (+${distToTarget}%) | RR: ${rr.toFixed(1)}</div>
+      </div>
+    </div>
+    <div class="entry-row">
+      <span class="entry-lbl">出来高</span>
+      <div>
+        <div class="entry-val">${volSignal}</div>
+        <div class="entry-sub">直近: $${fmtNum(lastVol)} / 平均: $${fmtNum(avgVol)}</div>
+      </div>
+    </div>
+  `;
+}
+
+function fmtPrice(p) {
+  if(!p||p===0) return '$0';
+  if(p>=0.01) return '$'+p.toFixed(4);
+  const s=p.toFixed(20), m=s.match(/^0\.(0+)([1-9]\d*)/);
+  if(!m) return '$'+p.toExponential(2);
+  const sub=m[1].length.toString().split('').map(d=>'₀₁₂₃₄₅₆₇₈₉'[d]).join('');
+  return `$0.0${sub}${m[2].slice(0,4)}`;
+}
+
+function fmtNum(n) {
+  if(n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(n>=1e3) return (n/1e3).toFixed(1)+'K';
+  return n.toFixed(0);
+}
+</script>
+</body>
+</html>
